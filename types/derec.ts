@@ -1,0 +1,149 @@
+// Role types
+export type Role = 'owner' | 'helper';
+export type HelperId = 1 | 2 | 3;
+
+// Message types for BroadcastChannel communication
+export type MessageType = 
+  | 'ANNOUNCE'
+  | 'PAIRING_REQUEST'
+  | 'PAIRING_RESPONSE'
+  | 'SHARE_DISTRIBUTION'
+  | 'SHARE_ACK'
+  | 'VERIFICATION_REQUEST'
+  | 'VERIFICATION_RESPONSE'
+  | 'RECOVERY_REQUEST'
+  | 'RECOVERY_RESPONSE'
+  | 'LIST_SHARES_REQUEST'
+  | 'LIST_SHARES_RESPONSE';
+
+export interface BaseMessage {
+  type: MessageType;
+  from: string; // 'owner' | 'helper-1' | 'helper-2' | 'helper-3'
+  to?: string;  // Target recipient, or undefined for broadcast
+  timestamp: number;
+}
+
+export interface AnnounceMessage extends BaseMessage {
+  type: 'ANNOUNCE';
+  role: Role;
+  helperId?: HelperId;
+  transportUri: string;
+}
+
+export interface PairingRequestMessage extends BaseMessage {
+  type: 'PAIRING_REQUEST';
+  channelId: string;
+  contactMessage: string; // Base64 encoded
+}
+
+export interface PairingResponseMessage extends BaseMessage {
+  type: 'PAIRING_RESPONSE';
+  channelId: string;
+  responseData: string; // Base64 encoded
+  accepted: boolean;
+}
+
+export interface ShareDistributionMessage extends BaseMessage {
+  type: 'SHARE_DISTRIBUTION';
+  secretId: string;
+  shareData: string; // Base64 encoded share
+  version: number;
+}
+
+export interface ShareAckMessage extends BaseMessage {
+  type: 'SHARE_ACK';
+  secretId: string;
+  received: boolean;
+}
+
+export interface VerificationRequestMessage extends BaseMessage {
+  type: 'VERIFICATION_REQUEST';
+  secretId: string;
+  requestData: string;
+}
+
+export interface VerificationResponseMessage extends BaseMessage {
+  type: 'VERIFICATION_RESPONSE';
+  secretId: string;
+  responseData: string;
+  valid: boolean;
+  reason: string;
+}
+
+export interface RecoveryRequestMessage extends BaseMessage {
+  type: 'RECOVERY_REQUEST';
+  secretId: string;
+  requestData: string;
+}
+
+export interface RecoveryResponseMessage extends BaseMessage {
+  type: 'RECOVERY_RESPONSE';
+  secretId: string;
+  shareData: string;
+}
+
+interface ListSharesRequestMessage extends BaseMessage {
+  type: 'LIST_SHARES_REQUEST';
+}
+
+interface ListSharesResponseMessage extends BaseMessage {
+  type: 'LIST_SHARES_RESPONSE';
+  shares: ShareInfo[];
+}
+
+export type DeRecMessage =
+  | AnnounceMessage
+  | PairingRequestMessage
+  | PairingResponseMessage
+  | ShareDistributionMessage
+  | ShareAckMessage
+  | VerificationRequestMessage
+  | VerificationResponseMessage
+  | RecoveryRequestMessage
+  | RecoveryResponseMessage
+  | ListSharesRequestMessage
+  | ListSharesResponseMessage;
+
+export const OFFLINE_THRESHOLD_MS = 15000;
+export const VERIFICATION_INTERVAL_MS = 10000; // Verify every 10 seconds
+
+export interface PairedHelper {
+  id: HelperId;
+  channelId: bigint;
+  transportUri: string;
+  paired: boolean;
+  hasShare: boolean;
+  lastSeen?: number;
+  lastVerified?: number;
+  verificationStatus?: 'pending' | 'valid' | 'invalid' | 'no-share';
+}
+
+export interface StoredShare {
+  secretId: string;
+  shareData: Uint8Array;
+  version: number;
+  receivedAt: number;
+}
+
+export interface ProtectedSecret {
+  id: string;
+  name: string;
+  value: string; 
+  version: number;
+  threshold: number;
+  helperCount: number;
+  createdAt: number;
+}
+
+export interface ShareInfo {
+  secretId: string;
+  version: number;
+  receivedAt: number;
+}
+
+// Log entry for UI
+export interface LogEntry {
+  timestamp: number;
+  level: 'info' | 'success' | 'warning' | 'error';
+  message: string;
+}
