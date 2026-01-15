@@ -409,6 +409,80 @@
     gap: var(--spacing-sm);
   }
 
+  .approval-section {
+    border: 2px solid var(--warning);
+    background: rgba(245, 158, 11, 0.1);
+  }
+  
+  .approval-card {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md);
+    background: var(--bg-secondary);
+    border-radius: var(--border-radius-sm);
+    border-left: 4px solid var(--warning);
+  }
+  
+  .approval-icon {
+    font-size: 2rem;
+    flex-shrink: 0;
+  }
+  
+  .approval-content {
+    flex: 1;
+  }
+  
+  .approval-message {
+    margin: 0 0 var(--spacing-sm) 0;
+    color: var(--text-primary);
+    line-height: 1.5;
+  }
+  
+  .approval-meta {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+  
+  .approval-actions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+  }
+  
+  .approve-button {
+    padding: var(--spacing-xs) var(--spacing-md);
+    background: var(--success);
+    border: none;
+    border-radius: var(--border-radius-sm);
+    color: white;
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.2s;
+  }
+  
+  .approve-button:hover {
+    background: #059669;
+    transform: translateY(-1px);
+  }
+  
+  .deny-button {
+    padding: var(--spacing-xs) var(--spacing-md);
+    background: transparent;
+    border: 1px solid var(--error);
+    border-radius: var(--border-radius-sm);
+    color: var(--error);
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.2s;
+  }
+  
+  .deny-button:hover {
+    background: var(--error);
+    color: white;
+  }
+
   .discovered-secrets {
     margin-top: var(--spacing-md);
     padding: var(--spacing-md);
@@ -984,3 +1058,419 @@
     }
   }
   
+  /* ============================================
+   Owner Name Setup Section
+   ============================================ */
+.name-setup-section {
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+.name-input-group {
+  margin-bottom: var(--spacing-lg);
+}
+
+.owner-name-input {
+  width: 100%;
+  padding: var(--spacing-md);
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-primary);
+  font-size: 1.1rem;
+  font-family: var(--font-body);
+  transition: border-color 0.2s;
+}
+
+.owner-name-input:focus {
+  outline: none;
+  border-color: var(--accent-owner);
+}
+
+.owner-name-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* Mode Selection */
+.mode-selection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
+}
+
+.mode-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.mode-option:hover {
+  border-color: var(--accent-owner);
+}
+
+.mode-option input[type="radio"] {
+  margin-top: 4px;
+  accent-color: var(--accent-owner);
+  width: 18px;
+  height: 18px;
+}
+
+.mode-option input[type="radio"]:checked + .mode-label {
+  color: var(--text-primary);
+}
+
+.mode-label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.mode-label strong {
+  font-size: 1rem;
+  color: var(--text-primary);
+}
+
+.mode-description {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+/* Recovery Mode Badge */
+.recovery-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: rgba(245, 158, 11, 0.2);
+  color: var(--warning);
+  border-radius: var(--border-radius-sm);
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin-left: var(--spacing-sm);
+}
+
+/* Pending status in section status */
+.status-info.pending {
+  color: var(--warning);
+  font-style: italic;
+}
+
+/* ============================================
+   Pairing Approval Section (Helper View)
+   ============================================ */
+.approval-section {
+  border: 2px solid var(--warning);
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.approval-section h2 {
+  color: var(--warning);
+}
+
+.approval-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.approval-card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-md);
+  padding: var(--spacing-lg);
+  background: var(--bg-secondary);
+  border-radius: var(--border-radius-sm);
+  border: 1px solid var(--border-color);
+}
+
+.approval-card.recovery {
+  border-color: var(--warning);
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.approval-icon {
+  font-size: 2rem;
+  flex-shrink: 0;
+}
+
+.approval-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.approval-message {
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+.approval-message strong {
+  color: var(--accent-owner);
+}
+
+.existing-secrets-info {
+  display: block;
+  margin-top: var(--spacing-xs);
+  padding: var(--spacing-sm);
+  background: rgba(34, 197, 94, 0.1);
+  border-radius: var(--border-radius-sm);
+  color: var(--success);
+}
+
+.approval-meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.approval-warning {
+  font-size: 0.85rem;
+  color: var(--warning);
+  padding: var(--spacing-sm);
+  background: rgba(245, 158, 11, 0.1);
+  border-radius: var(--border-radius-sm);
+  margin-top: var(--spacing-xs);
+}
+
+.approval-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  flex-shrink: 0;
+}
+
+.approve-button,
+.deny-button {
+  padding: var(--spacing-sm) var(--spacing-lg);
+  border-radius: var(--border-radius-sm);
+  font-weight: 500;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+  min-width: 100px;
+}
+
+.approve-button {
+  background: var(--success);
+  color: white;
+}
+
+.approve-button:hover {
+  background: #16a34a;
+  transform: translateY(-1px);
+}
+
+.deny-button {
+  background: transparent;
+  border: 1px solid var(--error);
+  color: var(--error);
+}
+
+.deny-button:hover {
+  background: var(--error);
+  color: white;
+}
+
+/* ============================================
+   Known Owners Section (Helper View)
+   ============================================ */
+.known-owners-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.known-owner-card {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+  background: var(--bg-secondary);
+  border-radius: var(--border-radius-sm);
+  border: 1px solid var(--border-color);
+}
+
+.owner-icon {
+  font-size: 1.5rem;
+}
+
+.owner-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.owner-name {
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--text-primary);
+}
+
+.owner-meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+/* ============================================
+   Shares Grouped by Owner (Helper View)
+   ============================================ */
+.shares-by-owner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.owner-shares-group {
+  background: var(--bg-tertiary);
+  border-radius: var(--border-radius);
+  padding: var(--spacing-md);
+  border: 1px solid var(--border-color);
+}
+
+.owner-shares-header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+  padding-bottom: var(--spacing-sm);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.share-count {
+  margin-left: auto;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--border-radius-sm);
+}
+
+/* ============================================
+   Info Note Warning Variant
+   ============================================ */
+.info-note.warning {
+  color: var(--warning);
+  background: rgba(245, 158, 11, 0.1);
+  padding: var(--spacing-sm);
+  border-radius: var(--border-radius-sm);
+  font-style: normal;
+}
+
+/* ============================================
+   Discovered Secrets (Recovery Mode)
+   ============================================ */
+.discovered-secrets {
+  margin-top: var(--spacing-lg);
+  padding: var(--spacing-md);
+  background: var(--bg-tertiary);
+  border-radius: var(--border-radius-sm);
+  border: 1px solid var(--border-color);
+}
+
+.discovered-secrets h4 {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  margin-bottom: var(--spacing-md);
+}
+
+.discovered-secret-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-md);
+  background: var(--bg-secondary);
+  border-radius: var(--border-radius-sm);
+  margin-bottom: var(--spacing-sm);
+}
+
+.discovered-secret-card:last-child {
+  margin-bottom: 0;
+}
+
+.discovered-secret-card .secret-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.discovered-secret-card .secret-id {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+
+.discovered-secret-card .secret-meta {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.discovered-secret-card .recover-button {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--success);
+  color: white;
+  border: none;
+  border-radius: var(--border-radius-sm);
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+}
+
+.discovered-secret-card .recover-button:hover:not(:disabled) {
+  background: #16a34a;
+}
+
+.discovered-secret-card .recover-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ============================================
+   Status Card Improvements
+   ============================================ */
+.status-card .status-value {
+  text-align: center;
+  word-break: break-word;
+  max-width: 100%;
+}
+
+/* Long paired owner name handling */
+.status-card .status-value.paired {
+  font-size: 0.8rem;
+}
+
+/* ============================================
+   Responsive adjustments for approval cards
+   ============================================ */
+@media (max-width: 768px) {
+  .approval-card {
+    flex-direction: column;
+  }
+  
+  .approval-actions {
+    flex-direction: row;
+    width: 100%;
+  }
+  
+  .approve-button,
+  .deny-button {
+    flex: 1;
+  }
+  
+  .mode-selection {
+    gap: var(--spacing-sm);
+  }
+}

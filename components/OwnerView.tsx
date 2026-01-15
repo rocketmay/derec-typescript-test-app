@@ -66,6 +66,13 @@ export function OwnerView({ derecLib, onBack }: OwnerViewProps) {
   const [shouldVerify, setShouldVerify] = useState(false);
   const [isRecoveryMode, setIsRecoveryMode] = useState(false);
   const [discoveredSecrets, setDiscoveredSecrets] = useState<Map<string, { secretId: string, version: number, helperCount: number }>>(new Map());
+  
+  // Owner identity - this is the name helpers will see
+  const [ownerName, setOwnerName] = useState('');
+  const [isNameSet, setIsNameSet] = useState(false);
+  
+  // Track which helpers have accepted/rejected pairing
+  const [pendingPairingHelpers, setPendingPairingHelpers] = useState<Set<HelperId>>(new Set());
 
   const handleMessage = useCallback((message: DeRecMessage) => {
     switch (message.type) {
@@ -95,23 +102,38 @@ export function OwnerView({ derecLib, onBack }: OwnerViewProps) {
       break;
 
       case 'PAIRING_RESPONSE':
+        const pairingHelperId = parseInt(message.from.split('-')[1]) as HelperId;
+        
+        // Remove from pending
+        setPendingPairingHelpers(prev => {
+          const next = new Set(prev);
+          next.delete(pairingHelperId);
+          return next;
+        });
+        
         if (message.accepted) {
-          const helperId = parseInt(message.from.split('-')[1]) as HelperId;
           setPairedHelpers(prev => {
-            const existing = prev.find(h => h.id === helperId);
+            const existing = prev.find(h => h.id === pairingHelperId);
             if (existing) {
-              return prev.map(h => h.id === helperId ? { ...h, paired: true } : h);
+              return prev.map(h => h.id === pairingHelperId ? { ...h, paired: true } : h);
             }
             return [...prev, {
-              id: helperId,
-              channelId: BigInt(helperId),
-              transportUri: `local://helper-${helperId}`,
+              id: pairingHelperId,
+              channelId: BigInt(pairingHelperId),
+              transportUri: `local://helper-${pairingHelperId}`,
               paired: true,
               hasShare: false,
               lastSeen: Date.now()
             }];
           });
-          addLog('success', `Paired with Helper ${helperId}`);
+          
+          if (message.existingSecretCount && message.existingSecretCount > 0) {
+            addLog('success', `Helper ${pairingHelperId} accepted pairing (has ${message.existingSecretCount} existing secret(s) for you)`);
+          } else {
+            addLog('success', `Helper ${pairingHelperId} accepted pairing`);
+          }
+        } else {
+          addLog('warning', `Helper ${pairingHelperId} rejected pairing request`);
         }
         break;
 
@@ -162,7 +184,6 @@ export function OwnerView({ derecLib, onBack }: OwnerViewProps) {
                   : h
                 )
               );
-              //addLog('success', `Helper ${verifyHelperId} verified share for "${verifySecret.name}"`);
             } else if (message.reason === 'no-share') {
               setPairedHelpers(prev =>
                 prev.map(h => h.id === verifyHelperId 
@@ -184,6 +205,7 @@ export function OwnerView({ derecLib, onBack }: OwnerViewProps) {
             console.log('Secret not found for verification response');
           }
         break;
+
         case 'LIST_SHARES_RESPONSE':
           const listHelperId = parseInt(message.from.split('-')[1]) as HelperId;
           console.log(`Received shares list from Helper ${listHelperId}:`, message.shares);
@@ -259,35 +281,55 @@ export function OwnerView({ derecLib, onBack }: OwnerViewProps) {
       return;
     }
 
+    if (!ownerName.trim()) {
+      addLog('warning', 'Please enter your name before pairing');
+      return;
+    }
+
     setWorkflow('pairing');
     
-    connectedHelpers.forEach((isOnline, helperId) => {
+    connectedHelpers.forEach((isOnline, visHelperId) => {
       if (isOnline) {
+        // Skip if already paired
+        const existingHelper = pairedHelpers.find(h => h.id === visHelperId);
+        if (existingHelper?.paired) {
+          return;
+        }
+        
         try {
-          const channelId = BigInt(helperId);
+          const channelId = BigInt(visHelperId);
           const contactMessage = derecLib.ts_create_contact_message(
             channelId,
-            `local://helper-${helperId}`
+            `local://helper-${visHelperId}`
           );
+          
+          // Add to pending
+          setPendingPairingHelpers(prev => {
+            const next = new Set(prev);
+            next.add(visHelperId);
+            return next;
+          });
           
           sendMessage({
             type: 'PAIRING_REQUEST',
-            to: `helper-${helperId}`,
-            channelId: helperId.toString(),
+            to: `helper-${visHelperId}`,
+            channelId: visHelperId.toString(),
             contactMessage: typeof contactMessage === 'object' 
               ? JSON.stringify(contactMessage)
-              : String(contactMessage)
+              : String(contactMessage),
+            ownerName: ownerName.trim(),
+            isRecoveryMode: isRecoveryMode
           });
           
-          addLog('info', `Sent pairing request to Helper ${helperId}`);
+          addLog('info', `Sent pairing request to Helper ${visHelperId} as "${ownerName}"${isRecoveryMode ? ' (recovery mode)' : ''}`);
         } catch (error) {
-          addLog('error', `Failed to create contact for Helper ${helperId}: ${error}`);
+          addLog('error', `Failed to create contact for Helper ${visHelperId}: ${error}`);
         }
       }
     });
 
     setTimeout(() => setWorkflow('idle'), 2000);
-  }, [derecLib, connectedHelpers, sendMessage, addLog]);
+  }, [derecLib, connectedHelpers, pairedHelpers, ownerName, isRecoveryMode, sendMessage, addLog]);
 
   // Protect a secret
   const protectSecret = useCallback(() => {
@@ -330,65 +372,60 @@ export function OwnerView({ derecLib, onBack }: OwnerViewProps) {
         version
       );
 
-// Debug: see what the library actually returns
-console.log('ts_protect_secret returned:');
-console.log('- type:', typeof shares);
-console.log('- isArray:', Array.isArray(shares));
-console.log('- value:', shares);
+      // Debug: see what the library actually returns
+      console.log('ts_protect_secret returned:');
+      console.log('- type:', typeof shares);
+      console.log('- isArray:', Array.isArray(shares));
+      console.log('- value:', shares);
 
-// Handle the Map structure returned by the library
-let shareEntries: Array<[bigint, any]> = [];
+      // Handle the Map structure returned by the library
+      let shareEntries: Array<[bigint, any]> = [];
 
-if (shares && typeof shares === 'object' && 'value' in shares && shares.value instanceof Map) {
-  // Library returns {value: Map(channelId -> shareData)}
-  shareEntries = Array.from(shares.value.entries());
-  console.log('Share entries from Map:', shareEntries);
-} else if (shares instanceof Map) {
-  shareEntries = Array.from(shares.entries());
-} else {
-  addLog('error', `Unexpected share format: ${typeof shares}`);
-  setWorkflow('idle');
-  return;
-}
+      if (shares && typeof shares === 'object' && 'value' in shares && shares.value instanceof Map) {
+        shareEntries = Array.from(shares.value.entries());
+        console.log('Share entries from Map:', shareEntries);
+      } else if (shares instanceof Map) {
+        shareEntries = Array.from(shares.entries());
+      } else {
+        addLog('error', `Unexpected share format: ${typeof shares}`);
+        setWorkflow('idle');
+        return;
+      }
 
       addLog('success', `Secret split into ${channels.length} shares (threshold: ${threshold})`);
 
       // Distribute shares to helpers
       const secretIdStr = uint8ArrayToBase64(secretId);
       
-shareEntries.forEach(([channelId, shareData]) => {
-  
-console.log('Paired helpers:', pairedHelpers.map(h => ({ id: h.id, paired: h.paired })));
-  const helperIdNum = Number(channelId) as HelperId;
-  const helper = pairedHelpers.find(h => h.id === helperIdNum);
-  
-  if (helper) {
-    // Convert share data to base64 for transmission
-    let shareDataStr: string;
-    
-    if (Array.isArray(shareData)) {
-      // Convert number array to Uint8Array, then to base64
-      const shareBytes = new Uint8Array(shareData);
-      shareDataStr = uint8ArrayToBase64(shareBytes);
-    } else if (shareData instanceof Uint8Array) {
-      shareDataStr = uint8ArrayToBase64(shareData);
-    } else {
-      shareDataStr = uint8ArrayToBase64(new Uint8Array(Object.values(shareData)));
-    }
+      shareEntries.forEach(([channelId, shareData]) => {
+        console.log('Paired helpers:', pairedHelpers.map(h => ({ id: h.id, paired: h.paired })));
+        const helperIdNum = Number(channelId) as HelperId;
+        const helper = pairedHelpers.find(h => h.id === helperIdNum);
+        
+        if (helper) {
+          let shareDataStr: string;
+          
+          if (Array.isArray(shareData)) {
+            const shareBytes = new Uint8Array(shareData);
+            shareDataStr = uint8ArrayToBase64(shareBytes);
+          } else if (shareData instanceof Uint8Array) {
+            shareDataStr = uint8ArrayToBase64(shareData);
+          } else {
+            shareDataStr = uint8ArrayToBase64(new Uint8Array(Object.values(shareData)));
+          }
 
-    console.log(`Sending share to Helper ${helper.id}, base64 length:`, shareDataStr.length);
+          console.log(`Sending share to Helper ${helper.id}, base64 length:`, shareDataStr.length);
 
-    sendMessage({
-      type: 'SHARE_DISTRIBUTION',
-      to: `helper-${helper.id}`,
-      secretId: secretIdStr,
-      shareData: shareDataStr,
-      version
-    });
-    addLog('info', `Sent share to Helper ${helper.id}`);
-  }
-});
-      
+          sendMessage({
+            type: 'SHARE_DISTRIBUTION',
+            to: `helper-${helper.id}`,
+            secretId: secretIdStr,
+            shareData: shareDataStr,
+            version
+          });
+          addLog('info', `Sent share to Helper ${helper.id}`);
+        }
+      });
 
       // Record the protected secret
       setSecrets(prev => [...prev, {
@@ -412,392 +449,482 @@ console.log('Paired helpers:', pairedHelpers.map(h => ({ id: h.id, paired: h.pai
     setTimeout(() => setWorkflow('idle'), 1000);
   }, [derecLib, secretInput, secretName, pairedHelpers, sendMessage, addLog]);
 
-// Request list of shares from all paired helpers (recovery mode)
-const requestSharesList = useCallback(() => {
-  if (pairedHelpers.filter(h => h.paired).length === 0) {
-    addLog('warning', 'No paired helpers to request from');
-    return;
-  }
-  
-  setDiscoveredSecrets(new Map()); // Clear previous discoveries
-  
-  pairedHelpers.forEach(helper => {
-    if (helper.paired) {
-      sendMessage({
-        type: 'LIST_SHARES_REQUEST',
-        to: `helper-${helper.id}`
-      });
-      addLog('info', `Requested shares list from Helper ${helper.id}`);
+  // Request list of shares from all paired helpers (recovery mode)
+  const requestSharesList = useCallback(() => {
+    if (pairedHelpers.filter(h => h.paired).length === 0) {
+      addLog('warning', 'No paired helpers to request from');
+      return;
     }
-  });
-}, [pairedHelpers, sendMessage, addLog]);
-
-// Recover a discovered secret (from recovery mode)
-const recoverDiscoveredSecret = useCallback((secretId: string, version: number) => {
-  if (!derecLib) {
-    addLog('error', 'DeRec library not initialized');
-    return;
-  }
-  
-  setWorkflow('recovering');
-  setRecoveredSecret(null);
-  
-  addLog('info', `Recovering secret ${secretId.slice(0, 8)}...`);
-  
-  const secretIdBytes = base64ToUint8Array(secretId);
-  
-  // Request shares from all paired helpers
-  pairedHelpers.forEach(helper => {
-    if (helper.paired) {
-      try {
-        const request = derecLib.ts_generate_share_request(
-          BigInt(helper.id),
-          secretIdBytes,
-          version
-        );
-        
+    
+    setDiscoveredSecrets(new Map()); // Clear previous discoveries
+    
+    pairedHelpers.forEach(helper => {
+      if (helper.paired) {
         sendMessage({
-          type: 'RECOVERY_REQUEST',
-          to: `helper-${helper.id}`,
-          secretId: secretId,
-          requestData: uint8ArrayToBase64(request)
+          type: 'LIST_SHARES_REQUEST',
+          to: `helper-${helper.id}`
         });
-        addLog('info', `Sent recovery request to Helper ${helper.id}`);
-      } catch (error) {
-        addLog('error', `Failed to generate request for Helper ${helper.id}: ${error}`);
+        addLog('info', `Requested shares list from Helper ${helper.id}`);
       }
+    });
+  }, [pairedHelpers, sendMessage, addLog]);
+
+  // Recover a discovered secret (from recovery mode)
+  const recoverDiscoveredSecret = useCallback((secretId: string, version: number) => {
+    if (!derecLib) {
+      addLog('error', 'DeRec library not initialized');
+      return;
     }
-  });
-}, [derecLib, pairedHelpers, sendMessage, addLog]);
+    
+    setWorkflow('recovering');
+    setRecoveredSecret(null);
+    
+    addLog('info', `Recovering secret ${secretId.slice(0, 8)}...`);
+    
+    const secretIdBytes = base64ToUint8Array(secretId);
+    
+    // Request shares from all paired helpers
+    pairedHelpers.forEach(helper => {
+      if (helper.paired) {
+        try {
+          const request = derecLib.ts_generate_share_request(
+            BigInt(helper.id),
+            secretIdBytes,
+            version
+          );
+          
+          sendMessage({
+            type: 'RECOVERY_REQUEST',
+            to: `helper-${helper.id}`,
+            secretId: secretId,
+            requestData: uint8ArrayToBase64(request)
+          });
+          addLog('info', `Sent recovery request to Helper ${helper.id}`);
+        } catch (error) {
+          addLog('error', `Failed to generate request for Helper ${helper.id}: ${error}`);
+        }
+      }
+    });
+  }, [derecLib, pairedHelpers, sendMessage, addLog]);
 
   // Recover a secret
-const recoverSecret = useCallback((secret: ProtectedSecret) => {
-  if (!derecLib) {
-    addLog('error', 'DeRec library not initialized');
-    return;
-  }
-  
-  setWorkflow('recovering');
-  setRecoveredSecret(null);
-  
-  addLog('info', `Starting recovery for "${secret.name}"...`);
-
-  const secretIdBytes = base64ToUint8Array(secret.id);
-
-  // Generate and send share requests to all helpers
-  pairedHelpers.forEach(helper => {
-    if (helper.hasShare) {
-      try {
-        // Generate a proper share request using the library
-        const request = derecLib.ts_generate_share_request(
-          BigInt(helper.id),
-          secretIdBytes,
-          secret.version
-        );
-        
-        console.log(`Generated share request for Helper ${helper.id}:`, request);
-        
-        sendMessage({
-          type: 'RECOVERY_REQUEST',
-          to: `helper-${helper.id}`,
-          secretId: secret.id,
-          requestData: uint8ArrayToBase64(request)
-        });
-        addLog('info', `Sent recovery request to Helper ${helper.id}`);
-      } catch (error) {
-        addLog('error', `Failed to generate request for Helper ${helper.id}: ${error}`);
-      }
+  const recoverSecret = useCallback((secret: ProtectedSecret) => {
+    if (!derecLib) {
+      addLog('error', 'DeRec library not initialized');
+      return;
     }
-  });
-}, [derecLib, pairedHelpers, sendMessage, addLog]);
+    
+    setWorkflow('recovering');
+    setRecoveredSecret(null);
+    
+    addLog('info', `Starting recovery for "${secret.name}"...`);
 
+    const secretIdBytes = base64ToUint8Array(secret.id);
 
-
-// Update shouldVerify when conditions change
-useEffect(() => {
-  const newShouldVerify = secrets.length > 0 && pairedHelpers.some(h => h.hasShare);
-  setShouldVerify(newShouldVerify);
-}, [secrets, pairedHelpers]);
-
-// Send verification requests to all helpers with shares
-const verifyHelpers = useCallback(() => {
-  if (!derecLib || secrets.length === 0) return;
-  
-  const secret = secrets[0]; // Verify the first secret
-  const secretIdBytes = base64ToUint8Array(secret.id);
-  
-  console.log('Verifying helpers');
-  
-  setPairedHelpers(prev => {
-    return prev.map(helper => {
-      console.log(`Checking helper ${helper.id}: hasShare=${helper.hasShare}`);
-      
+    // Generate and send share requests to all helpers
+    pairedHelpers.forEach(helper => {
       if (helper.hasShare) {
         try {
-          const request = derecLib.ts_generate_verification_request(
+          const request = derecLib.ts_generate_share_request(
+            BigInt(helper.id),
             secretIdBytes,
             secret.version
           );
           
-          console.log(`Sending verification request to Helper ${helper.id}`);
+          console.log(`Generated share request for Helper ${helper.id}:`, request);
           
           sendMessage({
-            type: 'VERIFICATION_REQUEST',
+            type: 'RECOVERY_REQUEST',
             to: `helper-${helper.id}`,
             secretId: secret.id,
             requestData: uint8ArrayToBase64(request)
           });
-          
-          return { ...helper, verificationStatus: 'pending' as const };
+          addLog('info', `Sent recovery request to Helper ${helper.id}`);
         } catch (error) {
-          console.error(`Failed to generate verification request for Helper ${helper.id}:`, error);
-          return helper;
+          addLog('error', `Failed to generate request for Helper ${helper.id}: ${error}`);
         }
       }
-      return helper;
     });
-  });
-}, [derecLib, secrets, sendMessage]);
+  }, [derecLib, pairedHelpers, sendMessage, addLog]);
 
-// Periodic verification
-useEffect(() => {
-  if (!shouldVerify) {
-    console.log('Not setting up timer - verification not needed');
-    return;
-  }
-  
-  console.log('Setting up verification timer');
-  
-  let initialTimeout: number;
-  let interval: number;
-  
-  initialTimeout = setTimeout(() => {
-    console.log('Initial verification (2s delay)');
-    verifyHelpers();
+  // Update shouldVerify when conditions change
+  useEffect(() => {
+    const newShouldVerify = secrets.length > 0 && pairedHelpers.some(h => h.hasShare);
+    setShouldVerify(newShouldVerify);
+  }, [secrets, pairedHelpers]);
+
+  // Send verification requests to all helpers with shares
+  const verifyHelpers = useCallback(() => {
+    if (!derecLib || secrets.length === 0) return;
     
-    interval = setInterval(() => {
-      console.log('Periodic verification (every 10s)');
-      verifyHelpers();
-    }, 10000);
-  }, 2000);
-  
-  return () => {
-    console.log('Cleaning up verification timer');
-    clearTimeout(initialTimeout);
-    if (interval) clearInterval(interval);
-  };
-}, [shouldVerify, verifyHelpers]);
-
-// Attempt reconstruction when we have enough shares
-// Attempt reconstruction when we have enough shares
-useEffect(() => {
-  if (workflow !== 'recovering' || !derecLib) return;
-
-  // Check discovered secrets (recovery mode)
-  discoveredSecrets.forEach((discovered, visSecretId) => {
-    const shares = pendingShares.get(visSecretId);
-    if (shares && shares.size >= 2) { // Assuming threshold of 2
-      try {
-        addLog('info', `Have ${shares.size} responses, attempting reconstruction...`);
-        
-        const secretIdBytes = base64ToUint8Array(visSecretId);
-        
-        const responsesMap = new Map<bigint, Uint8Array>();
-        shares.forEach((data, visHelperId) => {
-          responsesMap.set(BigInt(visHelperId), data);
-        });
-        
-        const wrappedResponses = { value: responsesMap };
-        
-        const recovered = derecLib.ts_recover_from_share_responses(
-          wrappedResponses,
-          secretIdBytes,
-          discovered.version
-        );
-        
-        const recoveredText = new TextDecoder().decode(recovered);
-        setRecoveredSecret({ name: `Recovered Secret`, value: recoveredText });
-        
-        // Add to secrets list
-        if (!secrets.find(s => s.id === visSecretId)) {
-          setSecrets(prev => [...prev, {
-            id: visSecretId,
-            name: `Recovered Secret`,
-            value: recoveredText,
-            version: discovered.version,
-            threshold: 2,
-            helperCount: discovered.helperCount,
-            createdAt: Date.now()
-          }]);
-        }
-        
-        // Clear from discovered
-        setDiscoveredSecrets(prev => {
-          const next = new Map(prev);
-          next.delete(visSecretId);
-          return next;
-        });
-        
-        addLog('success', 'Secret recovered and saved!');
-        setWorkflow('idle');
-        
-        // Clear pending shares
-        setPendingShares(prev => {
-          const next = new Map(prev);
-          next.delete(visSecretId);
-          return next;
-        });
-        
-      } catch (error) {
-        console.error('Recovery error:', error);
-        addLog('error', `Reconstruction failed: ${error}`);
-        setWorkflow('idle');
-      }
-    }
-  });
-
-  // Check known secrets (normal recovery)
-  secrets.forEach(secret => {
-    const shares = pendingShares.get(secret.id);
-    if (shares && shares.size >= secret.threshold) {
-      try {
-        addLog('info', `Have ${shares.size}/${secret.threshold} responses, attempting reconstruction...`);
-        
-        const secretIdBytes = base64ToUint8Array(secret.id);
-        
-        const responsesMap = new Map<bigint, Uint8Array>();
-        shares.forEach((data, visHelperId) => {
-          responsesMap.set(BigInt(visHelperId), data);
-        });
-        
-        const wrappedResponses = { value: responsesMap };
-        
-        const recovered = derecLib.ts_recover_from_share_responses(
-          wrappedResponses,
-          secretIdBytes,
-          secret.version
-        );
-        
-        const recoveredText = new TextDecoder().decode(recovered);
-        setRecoveredSecret({ name: secret.name, value: recoveredText });
-        addLog('success', `Secret "${secret.name}" recovered successfully!`);
-        setWorkflow('idle');
-        
-        setPendingShares(prev => {
-          const next = new Map(prev);
-          next.delete(secret.id);
-          return next;
-        });
-        
-      } catch (error) {
-        console.error('Recovery error:', error);
-        addLog('error', `Reconstruction failed: ${error}`);
-        setWorkflow('idle');
-      }
-    }
-  });
-}, [workflow, derecLib, secrets, discoveredSecrets, pendingShares, addLog]);
-
-// Re-share a secret with all paired helpers
-const reshareSecret = useCallback((secret: ProtectedSecret) => {
-  if (!derecLib) {
-    addLog('error', 'DeRec library not initialized');
-    return;
-  }
-
-  const pairedCount = pairedHelpers.filter(h => h.paired).length;
-  if (pairedCount < 3) {
-    addLog('warning', `Need at least 3 paired helpers (have ${pairedCount})`);
-    return;
-  }
-
-  setWorkflow('protecting');
-  addLog('info', `Re-sharing "${secret.name}" with all helpers...`);
-
-  try {
+    const secret = secrets[0]; // Verify the first secret
     const secretIdBytes = base64ToUint8Array(secret.id);
-    const secretData = new TextEncoder().encode(secret.value);
-    const channels = new BigUint64Array(
-      pairedHelpers.filter(h => h.paired).map(h => h.channelId)
-    );
-    const newVersion = secret.version + 1;
+    
+    console.log('Verifying helpers');
+    
+    setPairedHelpers(prev => {
+      return prev.map(helper => {
+        console.log(`Checking helper ${helper.id}: hasShare=${helper.hasShare}`);
+        
+        if (helper.hasShare) {
+          try {
+            const request = derecLib.ts_generate_verification_request(
+              secretIdBytes,
+              secret.version
+            );
+            
+            console.log(`Sending verification request to Helper ${helper.id}`);
+            
+            sendMessage({
+              type: 'VERIFICATION_REQUEST',
+              to: `helper-${helper.id}`,
+              secretId: secret.id,
+              requestData: uint8ArrayToBase64(request)
+            });
+            
+            return { ...helper, verificationStatus: 'pending' as const };
+          } catch (error) {
+            console.error(`Failed to generate verification request for Helper ${helper.id}:`, error);
+            return helper;
+          }
+        }
+        return helper;
+      });
+    });
+  }, [derecLib, secrets, sendMessage]);
 
-    const shares = derecLib.ts_protect_secret(
-      secretIdBytes,
-      secretData,
-      channels,
-      secret.threshold,
-      newVersion
-    );
+  // Periodic verification
+  useEffect(() => {
+    if (!shouldVerify) {
+      console.log('Not setting up timer - verification not needed');
+      return;
+    }
+    
+    console.log('Setting up verification timer');
+    
+    let initialTimeout: number;
+    let interval: number;
+    
+    initialTimeout = setTimeout(() => {
+      console.log('Initial verification (2s delay)');
+      verifyHelpers();
+      
+      interval = setInterval(() => {
+        console.log('Periodic verification (every 10s)');
+        verifyHelpers();
+      }, 10000);
+    }, 2000);
+    
+    return () => {
+      console.log('Cleaning up verification timer');
+      clearTimeout(initialTimeout);
+      if (interval) clearInterval(interval);
+    };
+  }, [shouldVerify, verifyHelpers]);
 
-    // Handle the Map structure returned by the library
-    let shareEntries: Array<[bigint, any]> = [];
-    if (shares && typeof shares === 'object' && 'value' in shares && shares.value instanceof Map) {
-      shareEntries = Array.from(shares.value.entries());
-    } else if (shares instanceof Map) {
-      shareEntries = Array.from(shares.entries());
-    } else {
-      addLog('error', `Unexpected share format: ${typeof shares}`);
-      setWorkflow('idle');
+  // Attempt reconstruction when we have enough shares
+  useEffect(() => {
+    if (workflow !== 'recovering' || !derecLib) return;
+
+    // Check discovered secrets (recovery mode)
+    discoveredSecrets.forEach((discovered, visSecretId) => {
+      const shares = pendingShares.get(visSecretId);
+      if (shares && shares.size >= 2) { // Assuming threshold of 2
+        try {
+          addLog('info', `Have ${shares.size} responses, attempting reconstruction...`);
+          
+          const secretIdBytes = base64ToUint8Array(visSecretId);
+          
+          const responsesMap = new Map<bigint, Uint8Array>();
+          shares.forEach((data, visHelperId) => {
+            responsesMap.set(BigInt(visHelperId), data);
+          });
+          
+          const wrappedResponses = { value: responsesMap };
+          
+          const recovered = derecLib.ts_recover_from_share_responses(
+            wrappedResponses,
+            secretIdBytes,
+            discovered.version
+          );
+          
+          const recoveredText = new TextDecoder().decode(recovered);
+          setRecoveredSecret({ name: `Recovered Secret`, value: recoveredText });
+          
+          // Add to secrets list
+          if (!secrets.find(s => s.id === visSecretId)) {
+            setSecrets(prev => [...prev, {
+              id: visSecretId,
+              name: `Recovered Secret`,
+              value: recoveredText,
+              version: discovered.version,
+              threshold: 2,
+              helperCount: discovered.helperCount,
+              createdAt: Date.now()
+            }]);
+          }
+          
+          // Clear from discovered
+          setDiscoveredSecrets(prev => {
+            const next = new Map(prev);
+            next.delete(visSecretId);
+            return next;
+          });
+          
+          addLog('success', 'Secret recovered and saved!');
+          setWorkflow('idle');
+          
+          // Clear pending shares
+          setPendingShares(prev => {
+            const next = new Map(prev);
+            next.delete(visSecretId);
+            return next;
+          });
+          
+        } catch (error) {
+          console.error('Recovery error:', error);
+          addLog('error', `Reconstruction failed: ${error}`);
+          setWorkflow('idle');
+        }
+      }
+    });
+
+    // Check known secrets (normal recovery)
+    secrets.forEach(secret => {
+      const shares = pendingShares.get(secret.id);
+      if (shares && shares.size >= secret.threshold) {
+        try {
+          addLog('info', `Have ${shares.size}/${secret.threshold} responses, attempting reconstruction...`);
+          
+          const secretIdBytes = base64ToUint8Array(secret.id);
+          
+          const responsesMap = new Map<bigint, Uint8Array>();
+          shares.forEach((data, visHelperId) => {
+            responsesMap.set(BigInt(visHelperId), data);
+          });
+          
+          const wrappedResponses = { value: responsesMap };
+          
+          const recovered = derecLib.ts_recover_from_share_responses(
+            wrappedResponses,
+            secretIdBytes,
+            secret.version
+          );
+          
+          const recoveredText = new TextDecoder().decode(recovered);
+          setRecoveredSecret({ name: secret.name, value: recoveredText });
+          addLog('success', `Secret "${secret.name}" recovered successfully!`);
+          setWorkflow('idle');
+          
+          setPendingShares(prev => {
+            const next = new Map(prev);
+            next.delete(secret.id);
+            return next;
+          });
+          
+        } catch (error) {
+          console.error('Recovery error:', error);
+          addLog('error', `Reconstruction failed: ${error}`);
+          setWorkflow('idle');
+        }
+      }
+    });
+  }, [workflow, derecLib, secrets, discoveredSecrets, pendingShares, addLog]);
+
+  // Re-share a secret with all paired helpers
+  const reshareSecret = useCallback((secret: ProtectedSecret) => {
+    if (!derecLib) {
+      addLog('error', 'DeRec library not initialized');
       return;
     }
 
-    // Distribute shares to helpers
-    shareEntries.forEach(([channelId, shareData]) => {
-      const visHelperIdNum = Number(channelId) as HelperId;
-      const helper = pairedHelpers.find(h => h.id === visHelperIdNum);
-      
-      if (helper) {
-        let shareDataStr: string;
-        if (Array.isArray(shareData)) {
-          const shareBytes = new Uint8Array(shareData);
-          shareDataStr = uint8ArrayToBase64(shareBytes);
-        } else if (shareData instanceof Uint8Array) {
-          shareDataStr = uint8ArrayToBase64(shareData);
-        } else {
-          shareDataStr = uint8ArrayToBase64(new Uint8Array(Object.values(shareData)));
-        }
+    const pairedCount = pairedHelpers.filter(h => h.paired).length;
+    if (pairedCount < 3) {
+      addLog('warning', `Need at least 3 paired helpers (have ${pairedCount})`);
+      return;
+    }
 
-        sendMessage({
-          type: 'SHARE_DISTRIBUTION',
-          to: `helper-${helper.id}`,
-          secretId: secret.id,
-          shareData: shareDataStr,
-          version: newVersion
-        });
-        addLog('info', `Sent new share to Helper ${helper.id}`);
+    setWorkflow('protecting');
+    addLog('info', `Re-sharing "${secret.name}" with all helpers...`);
+
+    try {
+      const secretIdBytes = base64ToUint8Array(secret.id);
+      const secretData = new TextEncoder().encode(secret.value);
+      const channels = new BigUint64Array(
+        pairedHelpers.filter(h => h.paired).map(h => h.channelId)
+      );
+      const newVersion = secret.version + 1;
+
+      const shares = derecLib.ts_protect_secret(
+        secretIdBytes,
+        secretData,
+        channels,
+        secret.threshold,
+        newVersion
+      );
+
+      // Handle the Map structure returned by the library
+      let shareEntries: Array<[bigint, any]> = [];
+      if (shares && typeof shares === 'object' && 'value' in shares && shares.value instanceof Map) {
+        shareEntries = Array.from(shares.value.entries());
+      } else if (shares instanceof Map) {
+        shareEntries = Array.from(shares.entries());
+      } else {
+        addLog('error', `Unexpected share format: ${typeof shares}`);
+        setWorkflow('idle');
+        return;
       }
-    });
 
-    // Update secret version
-    setSecrets(prev => prev.map(s => 
-      s.id === secret.id ? { ...s, version: newVersion } : s
-    ));
+      // Distribute shares to helpers
+      shareEntries.forEach(([channelId, shareData]) => {
+        const visHelperIdNum = Number(channelId) as HelperId;
+        const helper = pairedHelpers.find(h => h.id === visHelperIdNum);
+        
+        if (helper) {
+          let shareDataStr: string;
+          if (Array.isArray(shareData)) {
+            const shareBytes = new Uint8Array(shareData);
+            shareDataStr = uint8ArrayToBase64(shareBytes);
+          } else if (shareData instanceof Uint8Array) {
+            shareDataStr = uint8ArrayToBase64(shareData);
+          } else {
+            shareDataStr = uint8ArrayToBase64(new Uint8Array(Object.values(shareData)));
+          }
 
-    // Reset helper share status - they'll send ACKs when they receive new shares
-    setPairedHelpers(prev =>
-      prev.map(h => h.paired ? { ...h, hasShare: false, verificationStatus: undefined } : h)
-    );
+          sendMessage({
+            type: 'SHARE_DISTRIBUTION',
+            to: `helper-${helper.id}`,
+            secretId: secret.id,
+            shareData: shareDataStr,
+            version: newVersion
+          });
+          addLog('info', `Sent new share to Helper ${helper.id}`);
+        }
+      });
 
-    addLog('success', `Re-shared "${secret.name}" (v${newVersion}) with all helpers`);
-    
-  } catch (error) {
-    addLog('error', `Failed to re-share secret: ${error}`);
-  }
+      // Update secret version
+      setSecrets(prev => prev.map(s => 
+        s.id === secret.id ? { ...s, version: newVersion } : s
+      ));
 
-  setTimeout(() => setWorkflow('idle'), 1000);
-}, [derecLib, pairedHelpers, sendMessage, addLog]);
+      // Reset helper share status - they'll send ACKs when they receive new shares
+      setPairedHelpers(prev =>
+        prev.map(h => h.paired ? { ...h, hasShare: false, verificationStatus: undefined } : h)
+      );
+
+      addLog('success', `Re-shared "${secret.name}" (v${newVersion}) with all helpers`);
+      
+    } catch (error) {
+      addLog('error', `Failed to re-share secret: ${error}`);
+    }
+
+    setTimeout(() => setWorkflow('idle'), 1000);
+  }, [derecLib, pairedHelpers, sendMessage, addLog]);
 
   const pairedCount = pairedHelpers.filter(h => h.paired).length;
   const onlineCount = connectedHelpers.size;
+
+  // If name is not set, show name input first
+  if (!isNameSet) {
+    return (
+      <div className="owner-view">
+        <header className="view-header">
+          <button className="back-button" onClick={onBack}>← Back</button>
+          <div className="header-title">
+            <span className="role-badge owner">👤 Owner</span>
+            <h1>Secret Management</h1>
+          </div>
+          <div className="connection-status">
+            {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
+          </div>
+        </header>
+
+        <div className="view-content">
+          <div className="main-panel">
+            <section className="workflow-section name-setup-section">
+              <h2>
+                <span className="step-number">👤</span>
+                Set Your Identity
+              </h2>
+              <p className="section-description">
+                Enter your name. This is how helpers will identify you when you request to pair with them
+                or recover your secrets.
+              </p>
+              
+              <div className="name-input-group">
+                <input
+                  type="text"
+                  placeholder="Enter your name (e.g., Bob)"
+                  value={ownerName}
+                  onChange={(e) => setOwnerName(e.target.value)}
+                  className="owner-name-input"
+                  autoFocus
+                />
+              </div>
+              
+              <div className="mode-selection">
+                <label className="mode-option">
+                  <input
+                    type="radio"
+                    name="mode"
+                    checked={!isRecoveryMode}
+                    onChange={() => setIsRecoveryMode(false)}
+                  />
+                  <span className="mode-label">
+                    <strong>Normal Mode</strong>
+                    <span className="mode-description">I want to protect new secrets</span>
+                  </span>
+                </label>
+                <label className="mode-option">
+                  <input
+                    type="radio"
+                    name="mode"
+                    checked={isRecoveryMode}
+                    onChange={() => setIsRecoveryMode(true)}
+                  />
+                  <span className="mode-label">
+                    <strong>Recovery Mode</strong>
+                    <span className="mode-description">I lost my device and need to recover existing secrets</span>
+                  </span>
+                </label>
+              </div>
+              
+              <button 
+                className="action-button primary"
+                onClick={() => {
+                  if (ownerName.trim()) {
+                    setIsNameSet(true);
+                    addLog('info', `Identity set to "${ownerName}"${isRecoveryMode ? ' (recovery mode)' : ''}`);
+                  }
+                }}
+                disabled={!ownerName.trim()}
+              >
+                Continue as "{ownerName || '...'}"
+              </button>
+            </section>
+          </div>
+
+          <aside className="side-panel">
+            <NetworkStatus 
+              isOwner={true}
+              connectedHelpers={connectedHelpers}
+              pairedHelpers={pairedHelpers}
+            />
+            <ActivityLog logs={logs} />
+          </aside>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="owner-view">
       <header className="view-header">
         <button className="back-button" onClick={onBack}>← Back</button>
         <div className="header-title">
-          <span className="role-badge owner">👤 Owner</span>
+          <span className="role-badge owner">👤 {ownerName}</span>
           <h1>Secret Management</h1>
+          {isRecoveryMode && <span className="recovery-mode-badge">🔄 Recovery Mode</span>}
         </div>
         <div className="connection-status">
           {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
@@ -813,110 +940,125 @@ const reshareSecret = useCallback((secret: ProtectedSecret) => {
               Pair with Helpers
             </h2>
             <p className="section-description">
-              Establish secure channels with at least 3 helpers before protecting secrets.
+              {isRecoveryMode 
+                ? `Reconnect with your helpers to recover your secrets. They will see "${ownerName}" is requesting to recover.`
+                : `Establish secure channels with at least 3 helpers. They will see "${ownerName}" is requesting to pair.`
+              }
             </p>
             <div className="section-status">
               <span className={`status-badge ${pairedCount >= 3 ? 'success' : 'pending'}`}>
                 {pairedCount}/3 helpers paired
               </span>
               <span className="status-info">{onlineCount} online</span>
+              {pendingPairingHelpers.size > 0 && (
+                <span className="status-info pending">
+                  {pendingPairingHelpers.size} pending approval
+                </span>
+              )}
             </div>
             <button 
               className="action-button"
               onClick={pairWithHelpers}
               disabled={onlineCount === 0 || workflow === 'pairing'}
             >
-              {workflow === 'pairing' ? 'Pairing...' : 'Pair with Online Helpers'}
+              {workflow === 'pairing' ? 'Waiting for approval...' : 
+               isRecoveryMode ? 'Request Recovery Pairing' : 'Request Pairing'}
             </button>
           </section>
 
-          {/* Recovery Mode Section */}
-          <section className="workflow-section">
-            <h2>
-              <span className="step-number">🔄</span>
-              Recovery Mode
-            </h2>
-            <p className="section-description">
-              Lost your secrets? Request them from your helpers.
-            </p>
-            
-            <button 
-              className="action-button"
-              onClick={() => {
-                setIsRecoveryMode(true);
-                requestSharesList();
-              }}
-              disabled={pairedCount === 0 || workflow !== 'idle'}
-            >
-              🔍 Discover Secrets from Helpers
-            </button>
-            
-            {discoveredSecrets.size > 0 && (
-              <div className="discovered-secrets">
-                <h4>Discovered Secrets:</h4>
-                {Array.from(discoveredSecrets.entries()).map(([secretId, info]) => (
-                  <div key={secretId} className="discovered-secret-card">
-                    <div className="secret-info">
-                      <span className="secret-id">ID: {secretId.slice(0, 12)}...</span>
-                      <span className="secret-meta">
-                        v{info.version} • Found on {info.helperCount} helper(s)
-                      </span>
+          {/* Recovery Mode Section - only show in recovery mode */}
+          {isRecoveryMode && (
+            <section className="workflow-section">
+              <h2>
+                <span className="step-number">2</span>
+                Discover & Recover Secrets
+              </h2>
+              <p className="section-description">
+                Once paired, discover what secrets your helpers have stored for you.
+              </p>
+              
+              <button 
+                className="action-button"
+                onClick={requestSharesList}
+                disabled={pairedCount === 0 || workflow !== 'idle'}
+              >
+                🔍 Discover Secrets from Helpers
+              </button>
+              
+              {discoveredSecrets.size > 0 && (
+                <div className="discovered-secrets">
+                  <h4>Discovered Secrets:</h4>
+                  {Array.from(discoveredSecrets.entries()).map(([visSecretId, info]) => (
+                    <div key={visSecretId} className="discovered-secret-card">
+                      <div className="secret-info">
+                        <span className="secret-id">ID: {visSecretId.slice(0, 12)}...</span>
+                        <span className="secret-meta">
+                          v{info.version} • Found on {info.helperCount} helper(s)
+                        </span>
+                      </div>
+                      <button
+                        className="recover-button"
+                        onClick={() => recoverDiscoveredSecret(visSecretId, info.version)}
+                        disabled={workflow !== 'idle' || info.helperCount < 2}
+                      >
+                        🔓 Recover
+                      </button>
                     </div>
-                    <button
-                      className="recover-button"
-                      onClick={() => recoverDiscoveredSecret(secretId, info.version)}
-                      disabled={workflow !== 'idle' || info.helperCount < 2}
-                    >
-                      🔓 Recover
-                    </button>
-                  </div>
-                ))}
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* Step 2/3: Protect Secret - only show in normal mode */}
+          {!isRecoveryMode && (
+            <section className="workflow-section">
+              <h2>
+                <span className="step-number">2</span>
+                Protect a Secret
+              </h2>
+              <p className="section-description">
+                Split your secret into shares and distribute to paired helpers.
+              </p>
+              <div className="secret-input-group">
+                <input
+                  type="text"
+                  placeholder="Secret name (optional)"
+                  value={secretName}
+                  onChange={(e) => setSecretName(e.target.value)}
+                  className="secret-name-input"
+                />
+                <textarea
+                  placeholder="Enter your secret (password, key, etc.)"
+                  value={secretInput}
+                  onChange={(e) => setSecretInput(e.target.value)}
+                  className="secret-textarea"
+                  rows={3}
+                />
               </div>
-            )}
-          </section>
+              <button 
+                className="action-button primary"
+                onClick={protectSecret}
+                disabled={pairedCount < 3 || !secretInput.trim() || workflow === 'protecting'}
+              >
+                {workflow === 'protecting' ? 'Protecting...' : '🔒 Protect Secret'}
+              </button>
+            </section>
+          )}
 
-          {/* Step 2: Protect Secret */}
+          {/* Protected Secrets & Recovery */}
           <section className="workflow-section">
             <h2>
-              <span className="step-number">2</span>
-              Protect a Secret
-            </h2>
-            <p className="section-description">
-              Split your secret into shares and distribute to paired helpers.
-            </p>
-            <div className="secret-input-group">
-              <input
-                type="text"
-                placeholder="Secret name (optional)"
-                value={secretName}
-                onChange={(e) => setSecretName(e.target.value)}
-                className="secret-name-input"
-              />
-              <textarea
-                placeholder="Enter your secret (password, key, etc.)"
-                value={secretInput}
-                onChange={(e) => setSecretInput(e.target.value)}
-                className="secret-textarea"
-                rows={3}
-              />
-            </div>
-            <button 
-              className="action-button primary"
-              onClick={protectSecret}
-              disabled={pairedCount < 3 || !secretInput.trim() || workflow === 'protecting'}
-            >
-              {workflow === 'protecting' ? 'Protecting...' : '🔒 Protect Secret'}
-            </button>
-          </section>
-
-          {/* Step 3: Protected Secrets & Recovery */}
-          <section className="workflow-section">
-            <h2>
-              <span className="step-number">3</span>
+              <span className="step-number">{isRecoveryMode ? '3' : '3'}</span>
               Protected Secrets
             </h2>
             {secrets.length === 0 ? (
-              <p className="empty-state">No secrets protected yet</p>
+              <p className="empty-state">
+                {isRecoveryMode 
+                  ? 'No secrets recovered yet. Pair with helpers and discover your secrets above.'
+                  : 'No secrets protected yet'
+                }
+              </p>
             ) : (
               <div className="secrets-list">
                 {secrets.map(secret => {

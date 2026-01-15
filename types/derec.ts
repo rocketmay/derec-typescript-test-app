@@ -34,6 +34,8 @@ export interface PairingRequestMessage extends BaseMessage {
   type: 'PAIRING_REQUEST';
   channelId: string;
   contactMessage: string; // Base64 encoded
+  ownerName: string;      // Human-readable name for the owner (e.g., "Bob")
+  isRecoveryMode: boolean; // True if owner is trying to recover existing secrets
 }
 
 export interface PairingResponseMessage extends BaseMessage {
@@ -41,6 +43,7 @@ export interface PairingResponseMessage extends BaseMessage {
   channelId: string;
   responseData: string; // Base64 encoded
   accepted: boolean;
+  existingSecretCount?: number; // Number of secrets already stored for this owner (in recovery mode)
 }
 
 export interface ShareDistributionMessage extends BaseMessage {
@@ -123,6 +126,7 @@ export interface StoredShare {
   shareData: Uint8Array;
   version: number;
   receivedAt: number;
+  ownerName: string; // The name of the owner who shared this secret
 }
 
 export interface ProtectedSecret {
@@ -139,6 +143,7 @@ export interface ShareInfo {
   secretId: string;
   version: number;
   receivedAt: number;
+  ownerName: string; // Include owner name in share listings
 }
 
 // Log entry for UI
@@ -146,4 +151,33 @@ export interface LogEntry {
   timestamp: number;
   level: 'info' | 'success' | 'warning' | 'error';
   message: string;
+}
+
+
+// Pending pairing request that needs helper approval
+export interface PendingPairingRequest {
+  channelId: string;
+  ownerName: string;
+  isRecoveryMode: boolean;
+  contactMessage: string;
+  requestedAt: number;
+  existingSecretCount: number; // How many secrets we already have for this owner
+}
+
+// Known owner - tracks owners this helper has paired with
+export interface KnownOwner {
+  name: string;
+  secretIds: string[];
+  firstPairedAt: number;
+  lastSeenAt: number;
+}
+
+export interface PendingRecoveryRequest {
+  secretId: string;
+  requestData: string;
+  requestedAt: number;
+}
+
+export interface PendingListSharesRequest {
+  requestedAt: number;
 }
